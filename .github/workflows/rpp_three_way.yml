@@ -1,12 +1,15 @@
-name: RPP exact baseline comparison
+name: Ganesh vs RPP-EXACT scalability
 
 on:
+  push:
+    paths:
+      - '.github/workflows/rpp_three_way.yml'
   workflow_dispatch:
     inputs:
       sizes:
-        description: "Agent counts, comma-separated (start with 50,100,300)"
+        description: "Agent counts, comma-separated (start with 1000,3000,5000)"
         required: true
-        default: "50,100,300,1000,3000"
+        default: "1000,3000,5000,10000"
         type: string
       modes:
         description: "Profiles: random,cyclic,identical"
@@ -16,7 +19,7 @@ on:
       repeats:
         description: "Runs per instance"
         required: true
-        default: "3"
+        default: "2"
         type: string
 
 permissions:
@@ -28,7 +31,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout published implementation
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain (rotation_poset)
         uses: dtolnay/rust-toolchain@stable
@@ -40,18 +43,18 @@ jobs:
           cargo --version
           python3 --version
 
-      - name: Compile published RPP-SSP and FFK (no LEMON required)
-        run: make -j2 ssp_dijkstra competitor
+      - name: Compile published RPP-EXACT (SSP)
+        run: make -j2 ssp_dijkstra
 
       - name: Compile Ganesh et al. implementation
         run: g++ -O3 -DNDEBUG -std=c++17 -Wall benchmarks/ganesh_disjoint.cpp -o ganesh_disjoint
 
-      - name: Run same inputs through all three implementations
+      - name: Compare Ganesh and RPP-EXACT on identical inputs
         shell: bash
         env:
-          SIZES: ${{ inputs.sizes }}
-          MODES: ${{ inputs.modes }}
-          REPEATS: ${{ inputs.repeats }}
+          SIZES: ${{ inputs.sizes || '1000,3000,5000,10000' }}
+          MODES: ${{ inputs.modes || 'random,cyclic,identical' }}
+          REPEATS: ${{ inputs.repeats || '2' }}
         run: |
           mkdir -p benchmark_results
           python3 benchmarks/compare_ganesh_rpp.py \
@@ -59,15 +62,15 @@ jobs:
             --ganesh "$GITHUB_WORKSPACE/ganesh_disjoint" \
             --sizes "$SIZES" --modes "$MODES" \
             --seeds "41,42,43" --repeats "$REPEATS" \
-            --timeout 600 \
-            --out benchmark_results/rpp_ganesh_three_way.csv \
+            --timeout 360 \
+            --out benchmark_results/rpp_ganesh_two_way.csv \
             2>&1 | tee benchmark_results/benchmark.log
           exit ${PIPESTATUS[0]}
 
-      - name: Upload CSV, correctness flags and logs
+      - name: Upload CSV, agreement flags and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rpp-ganesh-ffk-ssp-results
+          name: ganesh-vs-rpp-exact-results
           path: benchmark_results/
           if-no-files-found: warn
