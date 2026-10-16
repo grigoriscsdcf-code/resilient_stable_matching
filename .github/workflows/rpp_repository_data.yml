@@ -1,0 +1,63 @@
+name: Ganesh vs RPP-EXACT repository datasets
+
+on:
+  workflow_dispatch:
+    inputs:
+      datasets:
+        description: "Bike,Food,Hard,NOR,RAP,TAXI,test_case (comma-separated)"
+        required: true
+        default: "Bike,Food,Hard,NOR,RAP,TAXI,test_case"
+        type: string
+      repeats:
+        description: "Repeated runs per dataset"
+        required: true
+        default: "2"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Checkout code and experimental data
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build published SSP and Ganesh implementations
+        run: |
+          make -j2 ssp_dijkstra
+          g++ -O3 -DNDEBUG -std=c++17 -Wall benchmarks/ganesh_disjoint.cpp -o ganesh_disjoint
+
+      - name: Verify the compressed datasets are present
+        run: |
+          ls -lh data/*_5000_instance.txt.gz data/test_case.txt
+          df -h .
+
+      - name: Compare the original repository preference profiles
+        shell: bash
+        env:
+          DATASETS: ${{ inputs.datasets }}
+          REPEATS: ${{ inputs.repeats }}
+        run: |
+          mkdir -p benchmark_results
+          python3 benchmarks/compare_ganesh_repository_data.py \
+            --repo "$GITHUB_WORKSPACE" \
+            --ganesh "$GITHUB_WORKSPACE/ganesh_disjoint" \
+            --datasets "$DATASETS" --repeats "$REPEATS" \
+            --timeout 600 --max-vmem-mib 5120 \
+            --out benchmark_results/repository_data_comparison.csv \
+            2>&1 | tee benchmark_results/benchmark.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Upload measurements and execution log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ganesh-rpp-original-repository-data
+          path: benchmark_results/
+          if-no-files-found: warn
